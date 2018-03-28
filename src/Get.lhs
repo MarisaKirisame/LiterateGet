@@ -134,6 +134,8 @@ We require the caller to keep 'Named' before 'Optional' to simplify stuff.
 > instance {-# OVERLAPPING #-} Get c f => Get (GetArg Here a b (c, d)) (Named e (Optional f)) where
 >   get (GetArg Here a b (c, d)) = named $ Passed $ get c
 
+Just some boilerplate instance. Nothing interesting.
+
 Let's have dog named only, snake propositional named, cat propositional named optional, and mouse named optional.
 Snake come before cat, and both mouse and dog cannot be passed propositionally.
 
@@ -156,3 +158,6 @@ Snake come before cat, and both mouse and dog cannot be passed propositionally.
 > FullPet _ _ _ _ = feedPetNamed (WithName MyCat Kitty $ WithName MyDog Doggo (Hoggie, ()))
 > FullPet _ _ _ _ = feedPetNamed (WithName MyDog Doggo $ WithName MyMouse Micky (Hoggie, ()))
 > FullPet _ _ _ _ = feedPetNamed (WithName MyMouse Micky $ WithName MyDog Doggo (Hoggie, ()))
+
+Another option is to have every argument named, possibly optional, never propositional, so that the ugly index will be gone.
+It also dont require GetArg anymore.
