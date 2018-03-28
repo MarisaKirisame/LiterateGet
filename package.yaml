@@ -1,0 +1,37 @@
+name:                LiterateGet
+version:             0.1.0.0
+github:              "MarisaKirisame/LiterateGet"
+license:             BSD3
+author:              "Marisa Kirisame"
+maintainer:          "lolisa@marisa.moe"
+copyright:           "2018 Marisa Kirisame"
+
+extra-source-files:
+- README.md
+- ChangeLog.md
+
+# Metadata used when publishing your package
+# synopsis:            Short description of your package
+# category:            Web
+
+# To avoid duplicated efforts in documentation and dealing with the
+# complications of embedding Haddock markup inside cabal files, it is
+# common to point users to the README.md file.
+description:         Please see the README on Github at <https://github.com/MarisaKirisame/LiterateGet#readme>
+
+dependencies:
+- base >= 4.7 && < 5
+
+library:
+  source-dirs: src
+
+tests:
+  LiterateGet-test:
+    main:                Spec.hs
+    source-dirs:         test
+    ghc-options:
+    - -threaded
+    - -rtsopts
+    - -with-rtsopts=-N
+    dependencies:
+    - LiterateGet
