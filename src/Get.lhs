@@ -1,7 +1,7 @@
 Let's write a library for conversion!
 
 > {-# Language MultiParamTypeClasses, FlexibleInstances, FlexibleContexts #-}
-> module Lib where
+> module Get where
 
 > class Get a b where
 >   get :: a -> b
