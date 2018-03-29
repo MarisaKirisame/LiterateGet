@@ -15,7 +15,7 @@ So, we can reify 'does the search succeed' into a variable (at class level, that
 
 > fromVal :: a -> Proxy a
 > fromVal _ = Proxy
-    
+
 > class TryGet as from ok | as from -> ok where
 >   tryGetSing :: Proxy from -> Proxy as -> Sing ok
 >   tryGetVal :: from -> Proxy as -> If ok as ()
@@ -27,8 +27,16 @@ This is more general than the old interface.
 > instance TryGet as from True => Get.Get as from where
 >   get x = tryGetVal x (Proxy :: Proxy as)
 
-> tryGetSingGet _ _ = STrue
-> tryGetValGet x _ = Get.get x
+After we reify failure, Optional Parameters should be easier - just recurse, if we can get the result, use it, and return Default if we cant.
 
-We dont want 'instance Get.Get as from => TryGet as from True' since it will mess up type checking, but it can definitely be done.
+> data Optional a = Passed a | Default
 
+> unOptionalP :: Proxy (Optional a) -> Proxy a
+> unOptionalP _ = Proxy
+
+> instance TryGet a b aOK => TryGet (Optional a) b True where 
+>   tryGetSing _ _ = STrue
+>   tryGetVal b p =
+>     case tryGet b (unOptionalP p) of
+>       (a, STrue) -> Passed a
+>       (_, SFalse) -> Default
