@@ -19,11 +19,16 @@ So, we can reify 'does the search succeed' into a variable (at class level, that
 > class TryGet as from ok | as from -> ok where
 >   tryGetSing :: Proxy from -> Proxy as -> Sing ok
 >   tryGetVal :: from -> Proxy as -> If ok as ()
->   tryGet :: from -> Proxy as -> (If ok as (), Sing ok)
+>   tryGet :: TryGet as from ok => from -> Proxy as -> (If ok as (), Sing ok)
 >   tryGet from p = (tryGetVal from p, tryGetSing (fromVal from) p)
 
 This is more general than the old interface.
 
-> instance TryGet as from True => Get.Get from as where
+> instance TryGet as from True => Get.Get as from where
 >   get x = tryGetVal x (Proxy :: Proxy as)
+
+> tryGetSingGet _ _ = STrue
+> tryGetValGet x _ = Get.get x
+
+We dont want 'instance Get.Get as from => TryGet as from True' since it will mess up type checking, but it can definitely be done.
 

@@ -25,8 +25,8 @@ But we can do cool stuff with this though. Like, Optional Arguments.
 
 Note that we get implicit conversion for parameters for free.
 
-> instance Get a (GetArg b c d e) => Get a (GetArg (Next b) c d (e, f)) where
->   get (GetArg (Next b) c d (e, f)) = get (GetArg b c d e)
+> instance Get a (GetArg b c d f) => Get a (GetArg (Next b) c d (e, f)) where
+>   get (GetArg (Next b) c d (e, f)) = get (GetArg b c d f)
 
 And some test case...
 
