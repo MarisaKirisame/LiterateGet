@@ -3,8 +3,8 @@ Let's write a library for conversion!
 > {-# Language MultiParamTypeClasses, FlexibleInstances, FlexibleContexts #-}
 > module Get where
 
-> class Get a b where
->   get :: a -> b
+> class Get as from where
+>   get :: from -> as
 
 > instance Get a a where
 >   get = id
@@ -17,16 +17,16 @@ But we can do cool stuff with this though. Like, Optional Arguments.
 > newtype Next a = Next { unNext :: a }
 > data GetArg index originalIndex context x = GetArg index originalIndex context x
 
-> getArg :: Get (GetArg a a b c) d => a -> b -> c -> d
-> getArg a b c = get (GetArg a a b c)
+> getArg :: Get a (GetArg b b c d) => b -> c -> d -> a
+> getArg b c d = get (GetArg b b c d)
 
-> instance Get c e => Get (GetArg Here a b (c, d)) e where
->   get (GetArg Here a b (c, d)) = get c
+> instance Get a d => Get a (GetArg Here b c (d, e)) where
+>   get (GetArg Here b c (d, e)) = get d
 
 Note that we get implicit conversion for parameters for free.
 
-> instance Get (GetArg a b c e) f => Get (GetArg (Next a) b c (d, e)) f where
->   get (GetArg (Next a) b c (d, e)) = get (GetArg a b c e)
+> instance Get a (GetArg b c d e) => Get a (GetArg (Next b) c d (e, f)) where
+>   get (GetArg (Next b) c d (e, f)) = get (GetArg b c d e)
 
 And some test case...
 
@@ -38,18 +38,18 @@ And some test case...
 
 Let's hope Disney doesnt see that line. I dont want anything to happen to my family :)
 
-> instance Get HogNose Snake where
+> instance Get Snake HogNose where
 >   get Hoggie = Noodle
 > data FullPet = FullPet Dog Snake Cat Mouse
 > data FeedPet = FeedPet
 
-> instance Get (GetArg a (Next Here) FeedPet ()) Dog where
+> instance Get Dog (GetArg a (Next Here) FeedPet ()) where
 >   get _ = Doggo
 
-> instance Get (GetArg a (Next (Next Here)) FeedPet ()) Cat where
+> instance Get Cat (GetArg a (Next (Next Here)) FeedPet ()) where
 >   get _ = Kitty
 
-> instance Get (GetArg a (Next (Next (Next Here))) FeedPet ()) Mouse where
+> instance Get Mouse (GetArg a (Next (Next (Next Here))) FeedPet ()) where
 >   get _ = Micky
 
 > feedPet a =
@@ -77,16 +77,16 @@ Let's deal with all optional parameters at once instead.
 > fromOptional _ (Passed a) = a
 > fromOptional a Default = a
 
-> instance {-# OVERLAPPING #-} Get c e => Get (GetArg Here a b (c, d)) (Optional e) where
->   get (GetArg Here a b (c, d)) = Passed $ get c
+> instance {-# OVERLAPPING #-} Get a d => Get (Optional a) (GetArg Here b c (d, e)) where
+>   get (GetArg Here b c (d, e)) = Passed $ get d
 
 Why do we reinvent Maybe? Cause we dont want such an instance for Maybe.
 In general, to avoid confusion between type that control the search and ordinary type, we create newtype for them everytime, and avoid using isomorphic ordinary type.
 
-> instance {-# OVERLAPPING #-} Get (GetArg a b c e) (Optional f) => Get (GetArg (Next a) b c (d, e)) (Optional f) where
->   get (GetArg (Next a) b c (d, e)) = get (GetArg a b c e)
+> instance {-# OVERLAPPING #-} Get (Optional a) (GetArg b c d f) => Get (Optional a) (GetArg (Next b) c d (e, f)) where
+>   get (GetArg (Next b) c d (e, f)) = get (GetArg b c d f)
 
-> instance Get (GetArg a b c ()) (Optional d) where
+> instance Get (Optional a) (GetArg b c d ()) where
 >   get _ = Default
 
 > feedPetOptional a =
@@ -113,26 +113,27 @@ We can also have Named Arguments.
 
 We require the caller to keep 'Named' before 'Optional' to simplify stuff.
 
-> instance Get (GetArg a b c f) g => Get (GetArg a b c (WithName d e f)) g where
->   get (GetArg a b c (WithName d e f)) = get (GetArg a b c f)
-> instance Get (GetArg a b c d) f => Get (GetArg a b c d) (Named e f) where
+instance Get a (GetArg b c d g) => Get a (GetArg b c d (WithName e f g)) where
+  get (GetArg b c d (WithName e f g)) = get (GetArg b c d g)
+
+> instance Get b (GetArg c d e f) => Get (Named a b) (GetArg c d e f) where
 >   get = named . get
-> instance {-# OVERLAPPING #-} Get (GetArg a b c f) (Named g h) => Get (GetArg a b c (WithName d e f)) (Named g h) where
->   get (GetArg a b c (WithName d e f)) = get (GetArg a b c f)
-> instance Get (GetArg () a b c) (Optional d) where
+> instance {-# OVERLAPPING #-} Get (Named a b) (GetArg c d e h) => Get (Named a b) (GetArg c d e (WithName f g h)) where
+>   get (GetArg c d e (WithName f g h)) = get (GetArg c d e h)
+> instance Get (Optional a) (GetArg () b c d) where
 >   get _ = Default
-> instance {-# OVERLAPPING #-} Get (GetArg () a b ()) (Optional c) where
+> instance {-# OVERLAPPING #-} Get (Optional a) (GetArg () b c ()) where
 >   get _ = Default
-> instance {-# OVERLAPPING #-} Get e g => Get (GetArg a b c (WithName d e f)) (Named d g) where
->   get (GetArg a b c (WithName d e f)) = named $ get e
-> instance {-# OVERLAPPING #-} Get (GetArg (Next a) b c (d, e)) g => Get (GetArg (Next a) b c (d, e)) (Named f g) where
+> instance {-# OVERLAPPING #-} Get b f => Get (Named a b) (GetArg c d e (WithName a f g)) where
+>   get (GetArg c d e (WithName a f g)) = named $ get f
+> instance {-# OVERLAPPING #-} Get b (GetArg (Next c) d e (f, g)) => Get (Named a b) (GetArg (Next c) d e (f, g)) where
 >   get = named . get
-> instance {-# OVERLAPPING #-} Get c f => Get (GetArg Here a b (c, d)) (Named e f) where
->   get (GetArg Here a b (c, d)) = named $ get c
-> instance {-# OVERLAPPING #-} Get e g => Get (GetArg a b c (WithName d e f)) (Named d (Optional g)) where
->   get (GetArg a b c (WithName d e f)) = named $ Passed $ get e
-> instance {-# OVERLAPPING #-} Get c f => Get (GetArg Here a b (c, d)) (Named e (Optional f)) where
->   get (GetArg Here a b (c, d)) = named $ Passed $ get c
+> instance {-# OVERLAPPING #-} Get b e => Get (Named a b) (GetArg Here c d (e, f))  where
+>   get (GetArg Here c d (e, f)) = named $ get e
+> instance {-# OVERLAPPING #-} Get b f => Get (Named a (Optional b)) (GetArg c d e (WithName a f g)) where
+>   get (GetArg c d e (WithName a f g)) = named $ Passed $ get f
+> instance {-# OVERLAPPING #-} Get b e => Get (Named a (Optional b)) (GetArg Here c d (e, f)) where
+>   get (GetArg Here c d (e, f)) = named $ Passed $ get e
 
 Just some boilerplate instance. Nothing interesting.
 
