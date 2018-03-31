@@ -22,17 +22,13 @@ So, we can reify 'does the search succeed' into a variable (at class level, that
 >   tryGet :: from -> Proxy as -> (If ok as (), Sing ok)
 >   tryGet from p = (tryGetVal from p, tryGetSing (fromVal from) p)
 
-> instance ok ~ True => TryGet a a ok where
->   tryGetSing _ _ = STrue
->   tryGetVal a _ = a
-
-> instance ok ~ False => TryGet a () ok where
+> instance ok ~ False => TryGet a b ok where
 >   tryGetSing _ _ = SFalse
 >   tryGetVal _ _ = ()
 
-> instance {-# OVERLAPPING #-} ok ~ True => TryGet () () ok where
+> instance {-# OVERLAPPING #-} ok ~ True => TryGet a a ok where
 >   tryGetSing _ _ = STrue
->   tryGetVal _ _ = ()
+>   tryGetVal a _ = a
 
 This is more general than the old interface.
 
@@ -59,7 +55,7 @@ After we reify failure, Optional Parameters should be easier - just recurse, if 
 > unOptionalP :: Proxy (Optional a) -> Proxy a
 > unOptionalP _ = Proxy
 
-> instance (ok ~ True, TryGet a b aOK) => TryGet (Optional a) b ok where 
+> instance {-# OVERLAPPING #-} (ok ~ True, TryGet a b aOK) => TryGet (Optional a) b ok where 
 >   tryGetSing _ _ = STrue
 >   tryGetVal b p =
 >     case tryGet b (unOptionalP p) of
@@ -80,7 +76,7 @@ This time, let's try to ditch propositional parameters and require all parameter
 > withNameRestP :: Proxy (WithName name arg rest) -> Proxy rest
 > withNameRestP _ = Proxy
 
-> instance TryGet (Named name a) d ok => TryGet (Named name a) (WithName b c d) ok where
+> instance {-# OVERLAPPING #-} TryGet (Named name a) d ok => TryGet (Named name a) (WithName b c d) ok where
 >   tryGetSing fp ap = tryGetSing (withNameRestP fp) ap
 >   tryGetVal (WithName _ _ r) ap = tryGetVal r ap
 
@@ -98,7 +94,7 @@ This time, let's try to ditch propositional parameters and require all parameter
 > data MyMouse = MyMouse
 > data FullPet = FullPet Snake Mouse
 
-> instance ok ~ True => TryGet Snake Hognose ok where
+> instance {-# OVERLAPPING #-} ok ~ True => TryGet Snake Hognose ok where
 >   tryGetSing _ _ = STrue
 >   tryGetVal _ _ = Noodle
 
@@ -117,7 +113,7 @@ Personally, I recommend passing all defaultable arguments as the zeroth argument
 And config can be passed down to subfunction to let caller config lower level detail.
 
 But we only have WithName to build config, so it is hard to merge two conflict file (although admittingly I never found such use case).
-Why dont we try to support merge?
+Why dont we try to support merge, just for the sake of doing it?
 
 > type family TFOr (l :: Bool) (r :: Bool) :: Bool
 > type instance TFOr True _ = True
@@ -129,8 +125,8 @@ Why dont we try to support merge?
 > andLP _ = Proxy
 > andRP :: Proxy (And l r) -> Proxy r
 > andRP _ = Proxy
-  
-> instance (TryGet a l lok, TryGet a r rok, ok ~ TFOr lok rok) => TryGet a (And l r) ok where
+
+> instance {-# OVERLAPPING #-} (TryGet a l lok, TryGet a r rok, ok ~ TFOr lok rok) => TryGet a (And l r) ok where
 >   tryGetSing fp ap =
 >       case lok of
 >         STrue -> STrue
@@ -152,7 +148,7 @@ And for symmetry...
 > type instance TFAnd True r = r
 > type instance TFAnd False _ = False
 
-> instance (TryGet l a lok, TryGet r a rok, ok ~ TFAnd lok rok) => TryGet (And l r) a ok where
+> instance {-# OVERLAPPING #-} (TryGet l a lok, TryGet r a rok, ok ~ TFAnd lok rok) => TryGet (And l r) a ok where
 >   tryGetSing fp ap =
 >     case lok of
 >       STrue -> rok
@@ -172,6 +168,8 @@ And for symmetry...
 
 If we can infer value 'a' from value 'b', and vice versa, we need to be able to get 'a' or 'b'.
 That is a use case for union type.
+To the mathematically inclined, if we see TryGet x y True as subtyping,
+And/Or is the Intersection/Union Type, forming a distributed lattice up to mutual subtyping.
 
 > data Or l r = OrL l | OrR r
 
@@ -180,7 +178,7 @@ That is a use case for union type.
 > orRP :: Proxy (Or l r) -> Proxy r
 > orRP _ = Proxy
 
-> instance (TryGet a l lok, TryGet a r rok, ok ~ TFAnd lok rok) => TryGet a (Or l r) ok where
+> instance {-# OVERLAPPING #-} (TryGet a l lok, TryGet a r rok, ok ~ TFAnd lok rok) => TryGet a (Or l r) ok where
 >   tryGetSing fp ap =
 >       case lok of
 >         STrue -> rok
@@ -201,7 +199,7 @@ That is a use case for union type.
 >       lok = tryGetSing (orLP (fromVal f)) ap
 >       rok = tryGetSing (orRP (fromVal f)) ap
 
-> instance (TryGet l a lok, TryGet r a rok, ok ~ TFOr lok rok) => TryGet (Or l r) a ok where
+> instance {-# OVERLAPPING #-} (TryGet l a lok, TryGet r a rok, ok ~ TFOr lok rok) => TryGet (Or l r) a ok where
 >   tryGetSing fp ap =
 >     case lok of
 >       STrue -> STrue
@@ -217,3 +215,107 @@ That is a use case for union type.
 >     where
 >       (lval, lok) = tryGet f (orLP ap)
 >       (rval, rok) = tryGet f (orRP ap)
+
+And now some boilerplate instance, to specify what to do when instance overlap.
+
+> instance {-# OVERLAPPING #-} (TryGet l (And x y) lok, TryGet r (And x y) rok, ok ~ TFAnd lok rok) => TryGet (And l r) (And x y) ok where
+>   tryGetSing fp ap =
+>     case lok of
+>       STrue -> rok
+>       SFalse -> SFalse
+>     where
+>       lok = tryGetSing fp (andLP ap)
+>       rok = tryGetSing fp (andRP ap)
+>   tryGetVal f ap =
+>     case (lok, rok) of
+>       (STrue, STrue) -> And lval rval
+>       (STrue, SFalse) -> ()
+>       (SFalse, STrue) -> ()
+>       (SFalse, SFalse) -> ()
+>     where
+>       (lval, lok) = tryGet f (andLP ap)
+>       (rval, rok) = tryGet f (andRP ap)
+
+> instance {-# OVERLAPPING #-} (TryGet l (Or x y) lok, TryGet r (Or x y) rok, ok ~ TFAnd lok rok) => TryGet (And l r) (Or x y) ok where
+>   tryGetSing fp ap =
+>     case lok of
+>       STrue -> rok
+>       SFalse -> SFalse
+>     where
+>       lok = tryGetSing fp (andLP ap)
+>       rok = tryGetSing fp (andRP ap)
+>   tryGetVal f ap =
+>     case (lok, rok) of
+>       (STrue, STrue) -> And lval rval
+>       (STrue, SFalse) -> ()
+>       (SFalse, STrue) -> ()
+>       (SFalse, SFalse) -> ()
+>     where
+>       (lval, lok) = tryGet f (andLP ap)
+>       (rval, rok) = tryGet f (andRP ap)
+
+> instance {-# OVERLAPPING #-} (TryGet l (And x y) lok, TryGet r (And x y) rok, ok ~ TFOr lok rok) => TryGet (Or l r) (And x y) ok where
+>   tryGetSing fp ap =
+>     case lok of
+>       STrue -> STrue
+>       SFalse -> rok
+>     where
+>       lok = tryGetSing fp (orLP ap)
+>       rok = tryGetSing fp (orRP ap)
+>   tryGetVal f ap =
+>     case (lok, rok) of
+>       (STrue, _) -> OrL lval
+>       (SFalse, STrue) -> OrR rval
+>       (SFalse, SFalse) -> ()
+>     where
+>       (lval, lok) = tryGet f (orLP ap)
+>       (rval, rok) = tryGet f (orRP ap)
+
+> instance {-# OVERLAPPING #-} (TryGet (Or x y) l lok, TryGet (Or x y) r rok, ok ~ TFAnd lok rok) => TryGet (Or x y) (Or l r) ok where
+>   tryGetSing fp ap =
+>       case lok of
+>         STrue -> rok
+>         SFalse -> SFalse
+>     where
+>       lok = tryGetSing (orLP fp) ap
+>       rok = tryGetSing (orRP fp) ap
+>   tryGetVal f ap =
+>     case (lok, rok) of
+>       (STrue, STrue) ->
+>         case f of
+>           OrL l -> tryGetVal l ap
+>           OrR r -> tryGetVal r ap
+>       (STrue, SFalse) -> ()
+>       (SFalse, STrue) -> ()
+>       (SFalse, SFalse) -> ()
+>     where
+>       lok = tryGetSing (orLP (fromVal f)) ap
+>       rok = tryGetSing (orRP (fromVal f)) ap
+
+> instance {-# OVERLAPPING #-} (ok ~ True, TryGet a (And l r) aOK) => TryGet (Optional a) (And l r) ok where 
+>   tryGetSing _ _ = STrue
+>   tryGetVal b p =
+>     case tryGet b (unOptionalP p) of
+>       (a, STrue) -> Passed a
+>       (_, SFalse) -> Default
+
+And a hypothetical use case, where we need to accept one of celsius or kelvin for config, default to celsius 0,
+alongside with a time.
+
+> data Celsius = Celsius Double
+> data Kelvin = Kelvin Double
+
+> data Time = Time Double
+
+> data TT = TT (Either Celsius Kelvin) Time
+
+> getTT a =
+>   case (get a) of
+>     And t Default -> TT (Left $ Celsius 0) t
+>     And t (Passed (OrL c)) -> TT (Left c) t
+>     And t (Passed (OrR k)) -> TT (Right k) t
+
+> TT _ _ = getTT (Time 0)
+> TT _ _ = getTT (And (Kelvin 0) (Time 0))
+
+That's it. Although we dont have lots of use for this, it is the basic building block for Recursion.lhs.
