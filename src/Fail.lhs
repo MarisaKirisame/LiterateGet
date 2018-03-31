@@ -1,4 +1,4 @@
-> {-# LANGUAGE MultiParamTypeClasses, FunctionalDependencies, DataKinds, FlexibleInstances, FlexibleContexts, UndecidableInstances, ScopedTypeVariables #-}
+> {-# LANGUAGE MultiParamTypeClasses, FunctionalDependencies, DataKinds, FlexibleInstances, FlexibleContexts, UndecidableInstances, ScopedTypeVariables, GADTs #-}
 > module Fail where
 
 > import qualified Get as Get -- You should read it before reading this
@@ -19,24 +19,96 @@ So, we can reify 'does the search succeed' into a variable (at class level, that
 > class TryGet as from ok | as from -> ok where
 >   tryGetSing :: Proxy from -> Proxy as -> Sing ok
 >   tryGetVal :: from -> Proxy as -> If ok as ()
->   tryGet :: TryGet as from ok => from -> Proxy as -> (If ok as (), Sing ok)
+>   tryGet :: from -> Proxy as -> (If ok as (), Sing ok)
 >   tryGet from p = (tryGetVal from p, tryGetSing (fromVal from) p)
+
+> instance ok ~ True => TryGet a a ok where
+>   tryGetSing _ _ = STrue
+>   tryGetVal a _ = a
+
+> instance ok ~ False => TryGet a () ok where
+>   tryGetSing _ _ = SFalse
+>   tryGetVal _ _ = ()
+
+> instance {-# OVERLAPPING #-} ok ~ True => TryGet () () ok where
+>   tryGetSing _ _ = STrue
+>   tryGetVal _ _ = ()
 
 This is more general than the old interface.
 
 > instance TryGet as from True => Get.Get as from where
 >   get x = tryGetVal x (Proxy :: Proxy as)
 
+And since the end user usually dont care about failure, we should still expose the Get.Get class to user.
+Since it is filled with old inference rule (instance), let's define a new one, doing essentially the same, but with one inference rule (depending on TryGet)
+
+> class Get as from where
+>   get :: from -> as
+
+> instance TryGet as from True => Get as from where
+>   get x = tryGetVal x (Proxy :: Proxy as)
+
 After we reify failure, Optional Parameters should be easier - just recurse, if we can get the result, use it, and return Default if we cant.
 
 > data Optional a = Passed a | Default
 
+> fromOptional :: a -> Optional a -> a
+> fromOptional a Default = a
+> fromOptional _ (Passed a) = a
+
 > unOptionalP :: Proxy (Optional a) -> Proxy a
 > unOptionalP _ = Proxy
 
-> instance TryGet a b aOK => TryGet (Optional a) b True where 
+> instance (ok ~ True, TryGet a b aOK) => TryGet (Optional a) b ok where 
 >   tryGetSing _ _ = STrue
 >   tryGetVal b p =
 >     case tryGet b (unOptionalP p) of
 >       (a, STrue) -> Passed a
 >       (_, SFalse) -> Default
+
+This time, let's try to ditch propositional parameters and require all parameter to be named, for simplicity and readability.
+
+> newtype Named name a = Named { unName :: name -> a }
+> named = Named . const
+> fromName n (Named f) = f n
+> data WithName name arg rest = WithName name arg rest
+
+> namedAP :: Proxy (Named name a) -> Proxy a
+> namedAP _ = Proxy
+> withNameArgP :: Proxy (WithName name arg rest) -> Proxy arg
+> withNameArgP _ = Proxy
+> withNameRestP :: Proxy (WithName name arg rest) -> Proxy rest
+> withNameRestP _ = Proxy
+
+> instance TryGet (Named name a) d ok => TryGet (Named name a) (WithName b c d) ok where
+>   tryGetSing fp ap = tryGetSing (withNameRestP fp) ap
+>   tryGetVal (WithName _ _ r) ap = tryGetVal r ap
+
+> instance {-# OVERLAPPING #-} TryGet a arg ok => TryGet (Named name a) (WithName name arg rest) ok where
+>   tryGetSing fp ap = tryGetSing (withNameArgP fp) (namedAP ap)
+>   tryGetVal (WithName _ f _) ap =
+>     case tryGet f (namedAP ap) of
+>       (a, STrue) -> named a
+>       (_, SFalse) -> ()
+
+> data Snake = Noodle
+> data Hognose = Hoggie
+> data Mouse = Micky
+> data MySnake = MySnake
+> data MyMouse = MyMouse
+> data FullPet = FullPet Snake Mouse
+
+> instance ok ~ True => TryGet Snake Hognose ok where
+>   tryGetSing _ _ = STrue
+>   tryGetVal _ _ = Noodle
+
+Let's keep it simple this time, for it isn't our main topic.
+And this time, we need 'Optional' in front of 'Named'.
+
+> feedPet a = FullPet (fromName MySnake (get a)) (fromName MyMouse (fromOptional (named Micky) (get a)))
+
+> FullPet _ _ = feedPet (WithName MySnake Hoggie ())
+> FullPet _ _ = feedPet (WithName MyMouse Micky (WithName MySnake Hoggie ()))
+> FullPet _ _ = feedPet (WithName MySnake Hoggie (WithName MyMouse Micky ()))
+
+And that's it. Much simpler than last attempt.

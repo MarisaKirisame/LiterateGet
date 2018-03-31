@@ -113,9 +113,6 @@ We can also have Named Arguments.
 
 We require the caller to keep 'Named' before 'Optional' to simplify stuff.
 
-instance Get a (GetArg b c d g) => Get a (GetArg b c d (WithName e f g)) where
-  get (GetArg b c d (WithName e f g)) = get (GetArg b c d g)
-
 > instance Get b (GetArg c d e f) => Get (Named a b) (GetArg c d e f) where
 >   get = named . get
 > instance {-# OVERLAPPING #-} Get (Named a b) (GetArg c d e h) => Get (Named a b) (GetArg c d e (WithName f g h)) where
