@@ -1,4 +1,4 @@
-> {-# LANGUAGE MultiParamTypeClasses, FunctionalDependencies, DataKinds, FlexibleInstances, FlexibleContexts, UndecidableInstances, ScopedTypeVariables, GADTs #-}
+> {-# LANGUAGE MultiParamTypeClasses, FunctionalDependencies, DataKinds, FlexibleInstances, FlexibleContexts, UndecidableInstances, ScopedTypeVariables, KindSignatures, TypeFamilies #-}
 > module Fail where
 
 > import qualified Get as Get -- You should read it before reading this
@@ -111,4 +111,109 @@ And this time, we need 'Optional' in front of 'Named'.
 > FullPet _ _ = feedPet (WithName MyMouse Micky (WithName MySnake Hoggie ()))
 > FullPet _ _ = feedPet (WithName MySnake Hoggie (WithName MyMouse Micky ()))
 
-And that's it. Much simpler than last attempt.
+That's it. Much simpler than last attempt.
+If we want to have propositional argument, just do it as a curried function (get named param from a, get all rest normally).
+Personally, I recommend passing all defaultable arguments as the zeroth argument (called config), and all rest as usual.
+And config can be passed down to subfunction to let caller config lower level detail.
+
+But we only have WithName to build config, so it is hard to merge two conflict file (although admittingly I never found such use case).
+Why dont we try to support merge?
+
+> type family TFOr (l :: Bool) (r :: Bool) :: Bool
+> type instance TFOr True _ = True
+> type instance TFOr False r = r
+
+> data And l r = And l r
+
+> andLP :: Proxy (And l r) -> Proxy l
+> andLP _ = Proxy
+> andRP :: Proxy (And l r) -> Proxy r
+> andRP _ = Proxy
+  
+> instance (TryGet a l lok, TryGet a r rok, ok ~ TFOr lok rok) => TryGet a (And l r) ok where
+>   tryGetSing fp ap =
+>       case lok of
+>         STrue -> STrue
+>         SFalse -> rok
+>     where
+>       lok = tryGetSing (andLP fp) ap
+>       rok = tryGetSing (andRP fp) ap
+>   tryGetVal (And l r) ap =
+>     case lok of
+>       STrue -> lval
+>       SFalse -> rval
+>     where
+>       (lval, lok) = tryGet l ap
+>       (rval, rok) = tryGet r ap
+
+And for symmetry...
+    
+> type family TFAnd (l :: Bool) (r :: Bool) :: Bool
+> type instance TFAnd True r = r
+> type instance TFAnd False _ = False
+
+> instance (TryGet l a lok, TryGet r a rok, ok ~ TFAnd lok rok) => TryGet (And l r) a ok where
+>   tryGetSing fp ap =
+>     case lok of
+>       STrue -> rok
+>       SFalse -> SFalse
+>     where
+>       lok = tryGetSing fp (andLP ap)
+>       rok = tryGetSing fp (andRP ap)
+>   tryGetVal f ap =
+>     case (lok, rok) of
+>       (STrue, STrue) -> And lval rval
+>       (STrue, SFalse) -> ()
+>       (SFalse, STrue) -> ()
+>       (SFalse, SFalse) -> ()
+>     where
+>       (lval, lok) = tryGet f (andLP ap)
+>       (rval, rok) = tryGet f (andRP ap)
+
+If we can infer value 'a' from value 'b', and vice versa, we need to be able to get 'a' or 'b'.
+That is a use case for union type.
+
+> data Or l r = OrL l | OrR r
+
+> orLP :: Proxy (Or l r) -> Proxy l
+> orLP _ = Proxy
+> orRP :: Proxy (Or l r) -> Proxy r
+> orRP _ = Proxy
+
+> instance (TryGet a l lok, TryGet a r rok, ok ~ TFAnd lok rok) => TryGet a (Or l r) ok where
+>   tryGetSing fp ap =
+>       case lok of
+>         STrue -> rok
+>         SFalse -> SFalse
+>     where
+>       lok = tryGetSing (orLP fp) ap
+>       rok = tryGetSing (orRP fp) ap
+>   tryGetVal f ap =
+>     case (lok, rok) of
+>       (STrue, STrue) ->
+>         case f of
+>           OrL l -> tryGetVal l ap
+>           OrR r -> tryGetVal r ap
+>       (STrue, SFalse) -> ()
+>       (SFalse, STrue) -> ()
+>       (SFalse, SFalse) -> ()
+>     where
+>       lok = tryGetSing (orLP (fromVal f)) ap
+>       rok = tryGetSing (orRP (fromVal f)) ap
+
+> instance (TryGet l a lok, TryGet r a rok, ok ~ TFOr lok rok) => TryGet (Or l r) a ok where
+>   tryGetSing fp ap =
+>     case lok of
+>       STrue -> STrue
+>       SFalse -> rok
+>     where
+>       lok = tryGetSing fp (orLP ap)
+>       rok = tryGetSing fp (orRP ap)
+>   tryGetVal f ap =
+>     case (lok, rok) of
+>       (STrue, _) -> OrL lval
+>       (SFalse, STrue) -> OrR rval
+>       (SFalse, SFalse) -> ()
+>     where
+>       (lval, lok) = tryGet f (orLP ap)
+>       (rval, rok) = tryGet f (orRP ap)
